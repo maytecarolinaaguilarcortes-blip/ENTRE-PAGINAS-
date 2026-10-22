@@ -1,1 +1,72 @@
 
+name: Construir APK de Entre Paginas
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - principal
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Descomprimir el proyecto subido como ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
+          if [ -z "${ZIP_FILE}" ]; then
+            echo "No se encontró el ZIP del proyecto en la raíz del repositorio."
+            exit 1
+          fi
+          mkdir -p /tmp/entre-paginas-project
+          unzip -q "$ZIP_FILE" -d /tmp/entre-paginas-project
+          PROJECT_DIR="$(find /tmp/entre-paginas-project -name package.json -type f -printf '%h\n' | head -n 1)"
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "El ZIP no contiene package.json; revisa que subiste el ZIP correcto."
+            find /tmp/entre-paginas-project -maxdepth 3 -type f | head -n 80
+            exit 1
+          fi
+          cp -a "$PROJECT_DIR"/. "$GITHUB_WORKSPACE"/
+          test -f package.json
+          test -f capacitor.config.json
+          test -f www/index.html
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Crear proyecto Android
+        run: npx cap add android
+
+      - name: Sincronizar archivos de la app
+        run: npx cap sync android
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Compilar APK de prueba
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug
+
+      - name: Publicar APK descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Entre-Paginas-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
